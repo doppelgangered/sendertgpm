@@ -27,8 +27,9 @@ from spintax import spin
 logger = logging.getLogger(__name__)
 
 TEXT_FILE = Path("text.txt")
-DEAD_DIR  = SESSIONS_DIR / "dead"
-FLOOD_DIR = SESSIONS_DIR / "flood"
+DEAD_DIR    = SESSIONS_DIR / "dead"
+FLOOD_DIR   = SESSIONS_DIR / "flood"
+WAITING_DIR = SESSIONS_DIR / "waiting"
 
 # Errors that mean the session/account is permanently unusable
 _DEAD_ERRORS = (
@@ -208,9 +209,13 @@ async def process_account(
                                 f"на {scheduled_at.strftime('%H:%M %d.%m.%Y')} UTC"
                             )
                         except Exception as e:
-                            logger.warning(
-                                f"[{session_name}] Не удалось запланировать сообщение: {e}"
-                            )
+                            # "Constructor ID not found" означает что Telethon не смог
+                            # распарсить ответ сервера, но сообщение уже запланировано —
+                            # подавляем молча. Остальные ошибки логируем на DEBUG.
+                            if "Constructor ID" not in str(e):
+                                logger.debug(
+                                    f"[{session_name}] Scheduled: {e}"
+                                )
 
                     delay = random.uniform(settings["min_delay"], settings["max_delay"])
                     await asyncio.sleep(delay)

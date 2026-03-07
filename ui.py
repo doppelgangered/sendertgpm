@@ -236,36 +236,65 @@ def run_menu() -> None:
 
 def _post_send_menu(stats: dict, make_table) -> None:
     """Показывается сразу после завершения рассылки."""
-    from sender import FLOOD_DIR
+    import shutil
+    from sender import FLOOD_DIR, WAITING_DIR
 
     while True:
         console.print("\n[bold green]Рассылка завершена![/]")
         console.print(make_table(stats))
         console.print("[dim]Подробный лог: sender.log[/]\n")
 
-        flood_in_dir = len(list(FLOOD_DIR.glob("*.session"))) if FLOOD_DIR.exists() else 0
+        flood_in_dir   = len(list(FLOOD_DIR.glob("*.session")))   if FLOOD_DIR.exists()   else 0
+        waiting_in_dir = len(list(WAITING_DIR.glob("*.session"))) if WAITING_DIR.exists() else 0
+        active_in_dir  = len(list(SESSIONS_DIR.glob("*.session")))
+
+        flood_str   = f"[yellow]{flood_in_dir}[/] в flood/"     if flood_in_dir   else "[dim]0 в flood/[/]"
+        waiting_str = f"[cyan]{waiting_in_dir}[/] в waiting/"   if waiting_in_dir else "[dim]0 в waiting/[/]"
 
         console.print("  [bold cyan]1.[/]  Продолжить рассылку (запустить ещё раз)")
-        released_str = f"[yellow]{flood_in_dir}[/] в flood/" if flood_in_dir else "[dim]0 в flood/[/]"
-        console.print(f"  [bold cyan]2.[/]  Вернуть из флудвейта ({released_str})")
+        console.print(f"  [bold cyan]2.[/]  Вернуть из флудвейта ({flood_str})")
+        console.print(f"  [bold cyan]3.[/]  Отложить сессии → sessions/waiting/  [dim]({active_in_dir} активных)[/]")
+        console.print(f"  [bold cyan]4.[/]  Вернуть отложенные ← sessions/waiting/ ({waiting_str})")
         console.print("  [bold cyan]0.[/]  Выйти в главное меню")
         console.print()
 
-        choice = Prompt.ask("  Выберите", choices=["0", "1", "2"])
+        choice = Prompt.ask("  Выберите", choices=["0", "1", "2", "3", "4"])
 
         if choice == "0":
             break
 
         elif choice == "1":
-            # Перезапуск — возвращаемся в run_menu
             run_menu()
             break
 
         elif choice == "2":
             _restore_sessions_from(FLOOD_DIR, "sessions/flood/")
-            # Обновляем счётчик flood в stats (сессии вышли вручную)
             still_in_flood = len(list(FLOOD_DIR.glob("*.session"))) if FLOOD_DIR.exists() else 0
             stats["flood"] = still_in_flood
+
+        elif choice == "3":
+            # Переместить все активные сессии в waiting/
+            active = list(SESSIONS_DIR.glob("*.session*"))
+            if not active:
+                console.print("  [dim]Нет активных сессий.[/]")
+                Prompt.ask("  Enter")
+                continue
+            session_count = len(list(SESSIONS_DIR.glob("*.session")))
+            if not Confirm.ask(f"  Переместить {session_count} сессий в sessions/waiting/?"):
+                continue
+            WAITING_DIR.mkdir(parents=True, exist_ok=True)
+            moved = 0
+            for f in SESSIONS_DIR.glob("*.session*"):
+                try:
+                    shutil.move(str(f), str(WAITING_DIR / f.name))
+                    moved += 1
+                except Exception as e:
+                    console.print(f"  [red]Ошибка: {f.name}: {e}[/]")
+            console.print(f"  [green]Отложено файлов: {moved}[/]")
+            Prompt.ask("  Enter")
+
+        elif choice == "4":
+            _restore_sessions_from(WAITING_DIR, "sessions/waiting/")
 
 
 # ─── Autoexport ──────────────────────────────────────────────────────────────
