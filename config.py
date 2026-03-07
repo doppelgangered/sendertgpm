@@ -17,6 +17,7 @@ DEFAULT_SETTINGS: dict = {
     "concurrent_accounts": 5,
     "message": "",
     "auto_delete": False,
+    "scheduled_messages": False,
 }
 
 

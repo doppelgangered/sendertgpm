@@ -272,6 +272,8 @@ def settings_menu() -> None:
 
         auto_delete = settings.get("auto_delete", False)
         auto_delete_label = "[green]Включено[/]" if auto_delete else "[red]Выключено[/]"
+        scheduled = settings.get("scheduled_messages", False)
+        scheduled_label = "[green]Включено[/]" if scheduled else "[red]Выключено[/]"
 
         t = Table(box=box.SIMPLE, title="Настройки", border_style="cyan")
         t.add_column("#", style="dim", justify="right")
@@ -288,17 +290,18 @@ def settings_menu() -> None:
         flood_label = f"[yellow]{flood_count}[/]" if flood_count else "[dim]0[/]"
 
         t.add_row("5", "Автоудаление у себя после отправки", auto_delete_label)
-        t.add_row("6", "Вернуть сессии из dead/  → sessions/", dead_label)
-        t.add_row("7", "Вернуть сессии из flood/ → sessions/", flood_label)
+        t.add_row("6", "Отложенные сообщения (+24ч, спинтакс)", scheduled_label)
+        t.add_row("7", "Вернуть сессии из dead/  → sessions/", dead_label)
+        t.add_row("8", "Вернуть сессии из flood/ → sessions/", flood_label)
         console.print(t)
         console.print()
-        console.print("  [bold cyan]1–5.[/]  Изменить параметр")
-        console.print("  [bold cyan]6.[/]    Восстановить мёртвые сессии")
-        console.print("  [bold cyan]7.[/]    Вернуть сессии из флудвейта")
+        console.print("  [bold cyan]1–6.[/]  Изменить параметр")
+        console.print("  [bold cyan]7.[/]    Восстановить мёртвые сессии")
+        console.print("  [bold cyan]8.[/]    Вернуть сессии из флудвейта")
         console.print("  [bold cyan]0.[/]    Назад")
         console.print()
 
-        choice = Prompt.ask("  Выберите", choices=["0", "1", "2", "3", "4", "5", "6", "7"])
+        choice = Prompt.ask("  Выберите", choices=["0", "1", "2", "3", "4", "5", "6", "7", "8"])
 
         if choice == "0":
             break
@@ -324,10 +327,15 @@ def settings_menu() -> None:
             console.print(f"  Автоудаление {state}")
 
         elif choice == "6":
+            settings["scheduled_messages"] = not scheduled
+            state = "[green]включено[/]" if settings["scheduled_messages"] else "[red]выключено[/]"
+            console.print(f"  Отложенные сообщения {state}")
+
+        elif choice == "7":
             _restore_dead_sessions()
             continue
 
-        elif choice == "7":
+        elif choice == "8":
             from sender import FLOOD_DIR as _FD
             _restore_sessions_from(_FD, "sessions/flood/")
             continue

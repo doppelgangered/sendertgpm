@@ -2,6 +2,7 @@ import asyncio
 import logging
 import random
 import shutil
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from telethon import TelegramClient
@@ -182,6 +183,24 @@ async def process_account(
                         logger.debug(
                             f"[{session_name}] Сообщение {sent.id} удалено у себя"
                         )
+
+                    if settings.get("scheduled_messages"):
+                        scheduled_at = datetime.now(timezone.utc) + timedelta(hours=24)
+                        scheduled_text = spin(template)
+                        try:
+                            await client.send_message(
+                                contact,
+                                scheduled_text,
+                                schedule=scheduled_at,
+                            )
+                            logger.debug(
+                                f"[{session_name}] Отложенное сообщение запланировано "
+                                f"на {scheduled_at.strftime('%H:%M %d.%m.%Y')} UTC"
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                f"[{session_name}] Не удалось запланировать сообщение: {e}"
+                            )
 
                     delay = random.uniform(settings["min_delay"], settings["max_delay"])
                     await asyncio.sleep(delay)
