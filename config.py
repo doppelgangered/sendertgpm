@@ -18,6 +18,7 @@ DEFAULT_SETTINGS: dict = {
     "message": "",
     "auto_delete": False,
     "scheduled_messages": False,
+    "mutual_only": False,
 }
 
 

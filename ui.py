@@ -270,10 +270,17 @@ def settings_menu() -> None:
 
         settings = load_settings()
 
-        auto_delete = settings.get("auto_delete", False)
-        auto_delete_label = "[green]Включено[/]" if auto_delete else "[red]Выключено[/]"
-        scheduled = settings.get("scheduled_messages", False)
-        scheduled_label = "[green]Включено[/]" if scheduled else "[red]Выключено[/]"
+        auto_delete  = settings.get("auto_delete", False)
+        scheduled    = settings.get("scheduled_messages", False)
+        mutual_only  = settings.get("mutual_only", False)
+
+        def _lbl(v: bool) -> str:
+            return "[green]Включено[/]" if v else "[red]Выключено[/]"
+
+        mutual_mode = (
+            "[yellow]Только взаимные[/]" if mutual_only
+            else "[dim]Взаимные + переписка[/]"
+        )
 
         t = Table(box=box.SIMPLE, title="Настройки", border_style="cyan")
         t.add_column("#", style="dim", justify="right")
@@ -283,25 +290,27 @@ def settings_menu() -> None:
         t.add_row("2", "Макс. задержка между сообщениями (сек)", str(settings["max_delay"]))
         t.add_row("3", "Задержка между аккаунтами (сек)", str(settings["account_delay"]))
         t.add_row("4", "Одновременно работающих аккаунтов", str(settings.get("concurrent_accounts", 5)))
+        t.add_row("5", "Автоудаление у себя после отправки", _lbl(auto_delete))
+        t.add_row("6", "Отложенные сообщения (+24ч, спинтакс)", _lbl(scheduled))
+        t.add_row("7", "Режим цели рассылки", mutual_mode)
+
         from sender import DEAD_DIR, FLOOD_DIR
         dead_count  = len(list(DEAD_DIR.glob("*.session")))  if DEAD_DIR.exists()  else 0
         flood_count = len(list(FLOOD_DIR.glob("*.session"))) if FLOOD_DIR.exists() else 0
-        dead_label  = f"[red]{dead_count}[/]"    if dead_count  else "[dim]0[/]"
+        dead_label  = f"[red]{dead_count}[/]"     if dead_count  else "[dim]0[/]"
         flood_label = f"[yellow]{flood_count}[/]" if flood_count else "[dim]0[/]"
 
-        t.add_row("5", "Автоудаление у себя после отправки", auto_delete_label)
-        t.add_row("6", "Отложенные сообщения (+24ч, спинтакс)", scheduled_label)
-        t.add_row("7", "Вернуть сессии из dead/  → sessions/", dead_label)
-        t.add_row("8", "Вернуть сессии из flood/ → sessions/", flood_label)
+        t.add_row("8", "Вернуть сессии из dead/  → sessions/", dead_label)
+        t.add_row("9", "Вернуть сессии из flood/ → sessions/", flood_label)
         console.print(t)
         console.print()
-        console.print("  [bold cyan]1–6.[/]  Изменить параметр")
-        console.print("  [bold cyan]7.[/]    Восстановить мёртвые сессии")
-        console.print("  [bold cyan]8.[/]    Вернуть сессии из флудвейта")
+        console.print("  [bold cyan]1–7.[/]  Изменить параметр")
+        console.print("  [bold cyan]8.[/]    Восстановить мёртвые сессии")
+        console.print("  [bold cyan]9.[/]    Вернуть сессии из флудвейта")
         console.print("  [bold cyan]0.[/]    Назад")
         console.print()
 
-        choice = Prompt.ask("  Выберите", choices=["0", "1", "2", "3", "4", "5", "6", "7", "8"])
+        choice = Prompt.ask("  Выберите", choices=["0","1","2","3","4","5","6","7","8","9"])
 
         if choice == "0":
             break
@@ -332,10 +341,17 @@ def settings_menu() -> None:
             console.print(f"  Отложенные сообщения {state}")
 
         elif choice == "7":
+            settings["mutual_only"] = not mutual_only
+            if settings["mutual_only"]:
+                console.print("  Режим: [yellow]только взаимные контакты[/] (переписка не требуется)")
+            else:
+                console.print("  Режим: [dim]взаимные контакты + хотя бы 1 сообщение[/]")
+
+        elif choice == "8":
             _restore_dead_sessions()
             continue
 
-        elif choice == "8":
+        elif choice == "9":
             from sender import FLOOD_DIR as _FD
             _restore_sessions_from(_FD, "sessions/flood/")
             continue

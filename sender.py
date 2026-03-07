@@ -81,13 +81,21 @@ def load_text_template() -> str:
 
 # ── Contact filter ────────────────────────────────────────────────────────────
 
-async def get_eligible_contacts(client: TelegramClient) -> list[User]:
-    """Mutual contacts that have at least one message in the dialog."""
-    eligible: list[User] = []
-
+async def get_eligible_contacts(
+    client: TelegramClient, mutual_only: bool = False
+) -> list[User]:
+    """
+    Returns eligible contacts for sending.
+    mutual_only=False: взаимные контакты + хотя бы 1 сообщение в диалоге (default)
+    mutual_only=True:  только взаимные контакты, история не проверяется
+    """
     result = await client(GetContactsRequest(hash=0))
     mutual = [c for c in result.users if isinstance(c, User) and c.mutual_contact]
 
+    if mutual_only:
+        return mutual
+
+    eligible: list[User] = []
     for contact in mutual:
         try:
             async for _ in client.iter_messages(contact, limit=1):
@@ -161,8 +169,10 @@ async def process_account(
                 return
 
             # ── Send ──────────────────────────────────────────────────────────
-            contacts = await get_eligible_contacts(client)
-            logger.info(f"[{session_name}] Подходящих контактов: {len(contacts)}")
+            mutual_only = settings.get("mutual_only", False)
+            contacts = await get_eligible_contacts(client, mutual_only=mutual_only)
+            mode_str = "только взаимные" if mutual_only else "взаимные + переписка"
+            logger.info(f"[{session_name}] Подходящих контактов: {len(contacts)} ({mode_str})")
 
             idx = 0
             while idx < len(contacts):
