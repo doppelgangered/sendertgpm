@@ -1,5 +1,6 @@
 sessions/
 proxies.txt
+autoexport.json
 *.log
 __pycache__/
 *.pyc

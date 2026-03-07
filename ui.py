@@ -66,13 +66,17 @@ def main_menu() -> None:
         console.print(_status_table())
 
         console.print()
+        from autoexport import loop_manager
+        loop_indicator = " [green]●[/]" if loop_manager.running else ""
+
         console.print("  [bold cyan]1.[/]  Запустить рассылку")
         console.print("  [bold cyan]2.[/]  Настройки")
         console.print("  [bold cyan]3.[/]  Прокси")
+        console.print(f"  [bold cyan]4.[/]  Автовыгруз сессий{loop_indicator}")
         console.print("  [bold cyan]0.[/]  Выход")
         console.print()
 
-        choice = Prompt.ask("  Выберите пункт", choices=["0", "1", "2", "3"])
+        choice = Prompt.ask("  Выберите пункт", choices=["0", "1", "2", "3", "4"])
 
         if choice == "1":
             run_menu()
@@ -80,7 +84,10 @@ def main_menu() -> None:
             settings_menu()
         elif choice == "3":
             proxy_menu()
+        elif choice == "4":
+            autoexport_menu()
         elif choice == "0":
+            loop_manager.stop()
             console.print("\n[dim]До свидания.[/]\n")
             break
 
@@ -259,6 +266,110 @@ def _post_send_menu(stats: dict, make_table) -> None:
             # Обновляем счётчик flood в stats (сессии вышли вручную)
             still_in_flood = len(list(FLOOD_DIR.glob("*.session"))) if FLOOD_DIR.exists() else 0
             stats["flood"] = still_in_flood
+
+
+# ─── Autoexport ──────────────────────────────────────────────────────────────
+
+def autoexport_menu() -> None:
+    from autoexport import (
+        fetch_once, load_autoexport_config, loop_manager, save_autoexport_config,
+    )
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+
+    while True:
+        console.clear()
+        console.print(_header())
+
+        cfg = load_autoexport_config()
+        api_key  = cfg["api_key"]
+        tg_id    = cfg["tg_id"]
+        interval = cfg["interval"]
+
+        key_display = (api_key[:6] + "…" + api_key[-4:]) if len(api_key) > 10 else (api_key or "[red]не задан[/]")
+
+        t = Table(box=box.SIMPLE, title="Автовыгруз сессий", border_style="cyan")
+        t.add_column("#", style="dim", justify="right")
+        t.add_column("Параметр")
+        t.add_column("Значение", style="cyan", justify="right")
+        t.add_row("1", "API ключ", key_display)
+        t.add_row("2", "Telegram ID", tg_id or "[red]не задан[/]")
+        t.add_row("3", "Интервал (сек)", str(interval))
+
+        status = "[green]● Запущен[/]" if loop_manager.running else "[dim]○ Остановлен[/]"
+        t.add_row("", "Статус цикла", status)
+
+        if loop_manager.last_result:
+            lr = loop_manager.last_result
+            ts = lr.timestamp.strftime("%H:%M:%S")
+            if lr.ok:
+                t.add_row("", "Последний выгруз", f"[green]+{lr.added} сессий[/] в {ts}")
+            else:
+                t.add_row("", "Последний выгруз", f"[red]{lr.error[:50]}[/]")
+            t.add_row("", "Итераций выполнено", str(loop_manager.iterations))
+
+        console.print(t)
+        console.print()
+        console.print("  [bold cyan]1–3.[/]  Изменить параметры")
+        console.print("  [bold cyan]4.[/]    Выгрузить сейчас (однократно)")
+        if loop_manager.running:
+            console.print("  [bold cyan]5.[/]    [red]Остановить авто-цикл[/]")
+        else:
+            console.print("  [bold cyan]5.[/]    [green]Запустить авто-цикл[/]")
+        console.print("  [bold cyan]0.[/]    Назад")
+        console.print()
+
+        choice = Prompt.ask("  Выберите", choices=["0", "1", "2", "3", "4", "5"])
+
+        if choice == "0":
+            break
+
+        elif choice == "1":
+            new_key = Prompt.ask("  API ключ", default=api_key)
+            cfg["api_key"] = new_key.strip()
+            save_autoexport_config(cfg)
+            console.print("  [green]Сохранено.[/]")
+
+        elif choice == "2":
+            new_id = Prompt.ask("  Telegram ID", default=tg_id)
+            cfg["tg_id"] = new_id.strip()
+            save_autoexport_config(cfg)
+            console.print("  [green]Сохранено.[/]")
+
+        elif choice == "3":
+            new_interval = IntPrompt.ask("  Интервал (сек)", default=interval)
+            cfg["interval"] = new_interval
+            save_autoexport_config(cfg)
+            console.print("  [green]Сохранено.[/]")
+
+        elif choice == "4":
+            if not api_key or not tg_id:
+                console.print("  [red]Заполните API ключ и Telegram ID.[/]")
+                Prompt.ask("  Enter")
+                continue
+
+            with Progress(SpinnerColumn(), TextColumn("  Выгрузка…"), console=console, transient=True) as p:
+                p.add_task("fetch")
+                import asyncio as _asyncio
+                result = _asyncio.run(fetch_once(api_key, tg_id))
+
+            if result.ok:
+                console.print(f"  [green]Готово! Добавлено сессий: {result.added}[/]  [dim](пропущено не-.session: {result.skipped})[/]")
+            else:
+                console.print(f"  [red]Ошибка: {result.error}[/]")
+            Prompt.ask("  Enter")
+
+        elif choice == "5":
+            if loop_manager.running:
+                loop_manager.stop()
+                console.print("  [yellow]Цикл остановлен.[/]")
+            else:
+                if not api_key or not tg_id:
+                    console.print("  [red]Заполните API ключ и Telegram ID.[/]")
+                    Prompt.ask("  Enter")
+                    continue
+                loop_manager.start(api_key, tg_id, interval)
+                console.print(f"  [green]Цикл запущен. Интервал: {interval}с[/]")
+            Prompt.ask("  Enter")
 
 
 # ─── Settings ─────────────────────────────────────────────────────────────────
