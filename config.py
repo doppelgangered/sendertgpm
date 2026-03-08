@@ -19,6 +19,8 @@ DEFAULT_SETTINGS: dict = {
     "auto_delete": False,
     "scheduled_messages": False,
     "mutual_only": False,
+    "forward_mode": False,
+    "forward_url": "",
 }
 
 

@@ -48,7 +48,12 @@ def _status_table() -> Table:
     text_status = (
         "[green]OK[/]" if TEXT_FILE.exists() else "[red]text.txt отсутствует[/]"
     )
-    t.add_row("Шаблон (text.txt)", text_status)
+    forward_mode = settings.get("forward_mode", False)
+    if forward_mode:
+        mode_str = "[cyan]Форвард[/]"
+    else:
+        mode_str = f"Текст  {text_status}"
+    t.add_row("Режим рассылки", mode_str)
     t.add_row(
         "Задержка",
         f"{settings['min_delay']}–{settings['max_delay']} сек / сообщ.",
@@ -69,14 +74,19 @@ def main_menu() -> None:
         from autoexport import loop_manager
         loop_indicator = " [green]●[/]" if loop_manager.running else ""
 
+        settings = load_settings()
+        fwd = settings.get("forward_mode", False)
+        mode_label = "[cyan]Форвард[/]" if fwd else "[dim]Текст[/]"
+
         console.print("  [bold cyan]1.[/]  Запустить рассылку")
         console.print("  [bold cyan]2.[/]  Настройки")
         console.print("  [bold cyan]3.[/]  Прокси")
         console.print(f"  [bold cyan]4.[/]  Автовыгруз сессий{loop_indicator}")
+        console.print(f"  [bold cyan]5.[/]  Режим: {mode_label}")
         console.print("  [bold cyan]0.[/]  Выход")
         console.print()
 
-        choice = Prompt.ask("  Выберите пункт", choices=["0", "1", "2", "3", "4"])
+        choice = Prompt.ask("  Выберите пункт", choices=["0", "1", "2", "3", "4", "5"])
 
         if choice == "1":
             run_menu()
@@ -86,6 +96,11 @@ def main_menu() -> None:
             proxy_menu()
         elif choice == "4":
             autoexport_menu()
+        elif choice == "5":
+            settings["forward_mode"] = not fwd
+            save_settings(settings)
+            new_label = "Форвард" if settings["forward_mode"] else "Текст"
+            console.print(f"  Режим переключён: [cyan]{new_label}[/]")
         elif choice == "0":
             loop_manager.stop()
             console.print("\n[dim]До свидания.[/]\n")
@@ -98,46 +113,87 @@ def run_menu() -> None:
     console.clear()
     console.print(_header())
 
-    # Validate text.txt
-    if not TEXT_FILE.exists():
+    settings = load_settings()
+    forward_mode = settings.get("forward_mode", False)
+
+    if forward_mode:
+        # ── Forward mode: ask for post URL ────────────────────────────────────
+        sessions = list(SESSIONS_DIR.glob("*.session")) if SESSIONS_DIR.exists() else []
+        if not sessions:
+            console.print(
+                Panel(
+                    "[red]Нет сессий в папке [bold]sessions/[/bold][/]",
+                    title="Ошибка",
+                    border_style="red",
+                )
+            )
+            Prompt.ask("\n  Enter для возврата")
+            return
+
+        current_url = settings.get("forward_url", "")
         console.print(
             Panel(
-                "[red]Файл [bold]text.txt[/bold] не найден.[/]\n"
-                "Создайте его в корне проекта и добавьте текст рассылки.\n\n"
-                "[dim]Поддерживается спинтакс: [bold]{Привет|Здравствуй} {мир|все}![/bold][/dim]",
-                title="Ошибка",
-                border_style="red",
+                "[cyan]Режим форвард[/]: каждый аккаунт перешлёт указанный пост всем контактам.\n\n"
+                "[dim]Форматы: https://t.me/username/123  или  https://t.me/c/CHANNEL_ID/123[/]",
+                title="Форвард",
+                border_style="cyan",
             )
         )
-        Prompt.ask("\n  Enter для возврата")
-        return
+        url = Prompt.ask("  URL поста для форварда", default=current_url).strip()
+        if not url:
+            console.print("[red]  URL не задан.[/]")
+            Prompt.ask("  Enter для возврата")
+            return
 
-    sessions = list(SESSIONS_DIR.glob("*.session")) if SESSIONS_DIR.exists() else []
-    if not sessions:
+        from sender import parse_post_url
+        if not parse_post_url(url):
+            console.print("[red]  Неверный формат URL.[/]")
+            Prompt.ask("  Enter для возврата")
+            return
+
+        settings["forward_url"] = url
+        save_settings(settings)
+
+    else:
+        # ── Text mode: validate text.txt ──────────────────────────────────────
+        if not TEXT_FILE.exists():
+            console.print(
+                Panel(
+                    "[red]Файл [bold]text.txt[/bold] не найден.[/]\n"
+                    "Создайте его в корне проекта и добавьте текст рассылки.\n\n"
+                    "[dim]Поддерживается спинтакс: [bold]{Привет|Здравствуй} {мир|все}![/bold][/dim]",
+                    title="Ошибка",
+                    border_style="red",
+                )
+            )
+            Prompt.ask("\n  Enter для возврата")
+            return
+
+        sessions = list(SESSIONS_DIR.glob("*.session")) if SESSIONS_DIR.exists() else []
+        if not sessions:
+            console.print(
+                Panel(
+                    "[red]Нет сессий в папке [bold]sessions/[/bold][/]",
+                    title="Ошибка",
+                    border_style="red",
+                )
+            )
+            Prompt.ask("\n  Enter для возврата")
+            return
+
+        # Preview template
+        template = TEXT_FILE.read_text(encoding="utf-8").strip()
+        from spintax import spin
+
         console.print(
             Panel(
-                "[red]Нет сессий в папке [bold]sessions/[/bold][/]",
-                title="Ошибка",
-                border_style="red",
+                f"[dim]Шаблон:[/]\n{template}\n\n[dim]Пример спина:[/]\n[cyan]{spin(template)}[/]",
+                title="text.txt",
+                border_style="dim",
             )
         )
-        Prompt.ask("\n  Enter для возврата")
-        return
-
-    # Preview template
-    template = TEXT_FILE.read_text(encoding="utf-8").strip()
-    from spintax import spin
-
-    console.print(
-        Panel(
-            f"[dim]Шаблон:[/]\n{template}\n\n[dim]Пример спина:[/]\n[cyan]{spin(template)}[/]",
-            title="text.txt",
-            border_style="dim",
-        )
-    )
 
     proxies = load_proxies()
-    settings = load_settings()
 
     console.print(f"\n  Сессий:  [bold]{len(sessions)}[/]")
     console.print(f"  Прокси:  [bold]{len(proxies)}[/]")

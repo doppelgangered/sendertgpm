@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import random
+import re
 import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -65,6 +66,28 @@ def _move_session(session_path: Path, target_dir: Path) -> Path:
 def _move_to_dead(session_path: Path) -> None:
     _move_session(session_path, DEAD_DIR)
     logger.warning(f"[{session_path.stem}] Сессия перемещена в sessions/dead/")
+
+
+# ── Forward URL parser ────────────────────────────────────────────────────────
+
+def parse_post_url(url: str) -> tuple[str | int, int] | None:
+    """
+    Parse a Telegram post link. Returns (peer, message_id) or None.
+
+    Supported formats:
+      https://t.me/username/123          — public channel/group
+      https://t.me/c/1234567890/123     — private channel (peer = -100<id>)
+    """
+    url = url.strip()
+    # Private channel: t.me/c/CHANNEL_ID/MSG_ID
+    m = re.match(r"https?://t\.me/c/(\d+)/(\d+)", url)
+    if m:
+        return int(f"-100{m.group(1)}"), int(m.group(2))
+    # Public: t.me/USERNAME/MSG_ID
+    m = re.match(r"https?://t\.me/([^/]+)/(\d+)", url)
+    if m:
+        return m.group(1), int(m.group(2))
+    return None
 
 
 # ── Template ──────────────────────────────────────────────────────────────────
@@ -170,52 +193,71 @@ async def process_account(
                 return
 
             # ── Send ──────────────────────────────────────────────────────────
-            mutual_only = settings.get("mutual_only", False)
+            mutual_only  = settings.get("mutual_only", False)
+            forward_mode = settings.get("forward_mode", False)
             contacts = await get_eligible_contacts(client, mutual_only=mutual_only)
-            mode_str = "только взаимные" if mutual_only else "взаимные + переписка"
-            logger.info(f"[{session_name}] Подходящих контактов: {len(contacts)} ({mode_str})")
+            target_str = "только взаимные" if mutual_only else "взаимные + переписка"
+            send_str   = "форвард" if forward_mode else "текст"
+            logger.info(
+                f"[{session_name}] Контактов: {len(contacts)} "
+                f"({target_str}, режим: {send_str})"
+            )
+
+            # Pre-parse forward URL once per account
+            forward_peer = forward_msg_id = None
+            if forward_mode:
+                parsed = parse_post_url(settings.get("forward_url", ""))
+                if not parsed:
+                    logger.error(
+                        f"[{session_name}] Неверный URL для форварда: "
+                        f"{settings.get('forward_url')!r}"
+                    )
+                    return
+                forward_peer, forward_msg_id = parsed
 
             idx = 0
             while idx < len(contacts):
                 contact = contacts[idx]
-                message = spin(template)
 
                 try:
-                    sent = await client.send_message(contact, message)
-                    stats["sent"] += 1
-                    if progress_callback:
-                        progress_callback(stats)
-                    logger.info(
-                        f"[{session_name}] -> {contact.id} ({contact.first_name})"
-                    )
-
-                    if settings.get("auto_delete"):
-                        await client.delete_messages(contact, [sent.id], revoke=False)
-                        logger.debug(
-                            f"[{session_name}] Сообщение {sent.id} удалено у себя"
+                    if forward_mode:
+                        # ── Forward mode ─────────────────────────────────────
+                        fwd = await client.forward_messages(
+                            contact, forward_msg_id, forward_peer
                         )
+                        sent_ids = [m.id for m in (fwd if isinstance(fwd, list) else [fwd]) if m]
+                        stats["sent"] += 1
+                        if progress_callback:
+                            progress_callback(stats)
+                        logger.info(
+                            f"[{session_name}] forward -> {contact.id} ({contact.first_name})"
+                        )
+                        if settings.get("auto_delete") and sent_ids:
+                            await client.delete_messages(contact, sent_ids, revoke=False)
 
-                    if settings.get("scheduled_messages"):
-                        scheduled_at = datetime.now(timezone.utc) + timedelta(hours=24)
-                        scheduled_text = spin(template)
-                        try:
-                            await client.send_message(
-                                contact,
-                                scheduled_text,
-                                schedule=scheduled_at,
-                            )
-                            logger.debug(
-                                f"[{session_name}] Отложенное сообщение запланировано "
-                                f"на {scheduled_at.strftime('%H:%M %d.%m.%Y')} UTC"
-                            )
-                        except Exception as e:
-                            # "Constructor ID not found" означает что Telethon не смог
-                            # распарсить ответ сервера, но сообщение уже запланировано —
-                            # подавляем молча. Остальные ошибки логируем на DEBUG.
-                            if "Constructor ID" not in str(e):
-                                logger.debug(
-                                    f"[{session_name}] Scheduled: {e}"
+                    else:
+                        # ── Text mode ─────────────────────────────────────────
+                        message = spin(template)
+                        sent = await client.send_message(contact, message)
+                        stats["sent"] += 1
+                        if progress_callback:
+                            progress_callback(stats)
+                        logger.info(
+                            f"[{session_name}] -> {contact.id} ({contact.first_name})"
+                        )
+                        if settings.get("auto_delete"):
+                            await client.delete_messages(contact, [sent.id], revoke=False)
+                            logger.debug(f"[{session_name}] Сообщение {sent.id} удалено у себя")
+
+                        if settings.get("scheduled_messages"):
+                            scheduled_at = datetime.now(timezone.utc) + timedelta(hours=24)
+                            try:
+                                await client.send_message(
+                                    contact, spin(template), schedule=scheduled_at,
                                 )
+                            except Exception as e:
+                                if "Constructor ID" not in str(e):
+                                    logger.debug(f"[{session_name}] Scheduled: {e}")
 
                     delay = random.uniform(settings["min_delay"], settings["max_delay"])
                     await asyncio.sleep(delay)
@@ -321,7 +363,10 @@ async def process_account(
 async def run_sender(progress_callback=None) -> dict:
     settings = load_settings()
     proxies  = load_proxies()
-    template = load_text_template()
+    if settings.get("forward_mode"):
+        template = ""
+    else:
+        template = load_text_template()
 
     SESSIONS_DIR.mkdir(exist_ok=True)
     sessions = sorted(SESSIONS_DIR.glob("*.session"))
