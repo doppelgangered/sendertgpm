@@ -14,7 +14,7 @@ def spin(text: str) -> str:
       "{Hello|Hi} {world|there}!" -> "Hi there!" (random each call)
     """
     # Keep replacing innermost {...} groups until none remain
-    pattern = re.compile(r"\{([^{}]+)\}")
+    pattern = re.compile(r"\{([^{}]*\|[^{}]*)\}")
     while pattern.search(text):
         text = pattern.sub(lambda m: random.choice(m.group(1).split("|")), text)
     return text
