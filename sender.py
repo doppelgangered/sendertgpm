@@ -21,6 +21,7 @@ from telethon.errors import (
 )
 from telethon.tl.types import User
 
+from bots import apply_bot, load_bots
 from config import SESSIONS_DIR, get_api_credentials, load_settings
 from proxy_manager import assign_proxy, load_proxies, proxy_to_telethon
 from spintax import spin
@@ -203,6 +204,9 @@ async def process_account(
                 f"({target_str}, режим: {send_str})"
             )
 
+            # Load bots once per account
+            bots = load_bots()
+
             # Pre-parse forward URL once per account
             forward_peer = forward_msg_id = None
             if forward_mode:
@@ -237,7 +241,7 @@ async def process_account(
 
                     else:
                         # ── Text mode ─────────────────────────────────────────
-                        message = spin(template)
+                        message = apply_bot(spin(template), bots)
                         sent = await client.send_message(contact, message)
                         stats["sent"] += 1
                         if progress_callback:
@@ -253,7 +257,9 @@ async def process_account(
                             scheduled_at = datetime.now(timezone.utc) + timedelta(hours=24)
                             try:
                                 await client.send_message(
-                                    contact, spin(template), schedule=scheduled_at,
+                                    contact,
+                                    apply_bot(spin(template), bots),
+                                    schedule=scheduled_at,
                                 )
                             except Exception as e:
                                 if "Constructor ID" not in str(e):

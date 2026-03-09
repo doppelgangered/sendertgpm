@@ -490,23 +490,28 @@ def settings_menu() -> None:
         t.add_row("6", "Отложенные сообщения (+24ч, спинтакс)", _lbl(scheduled))
         t.add_row("7", "Режим цели рассылки", mutual_mode)
 
+        from bots import load_bots as _load_bots
         from sender import DEAD_DIR, FLOOD_DIR
         dead_count  = len(list(DEAD_DIR.glob("*.session")))  if DEAD_DIR.exists()  else 0
         flood_count = len(list(FLOOD_DIR.glob("*.session"))) if FLOOD_DIR.exists() else 0
+        bots_count  = len(_load_bots())
         dead_label  = f"[red]{dead_count}[/]"     if dead_count  else "[dim]0[/]"
         flood_label = f"[yellow]{flood_count}[/]" if flood_count else "[dim]0[/]"
+        bots_label  = f"[cyan]{bots_count}[/]"    if bots_count  else "[dim]0[/]"
 
-        t.add_row("8", "Вернуть сессии из dead/  → sessions/", dead_label)
-        t.add_row("9", "Вернуть сессии из flood/ → sessions/", flood_label)
+        t.add_row("8", "Боты {bot} — управление списком", bots_label)
+        t.add_row("9", "Вернуть сессии из dead/  → sessions/", dead_label)
+        t.add_row("10", "Вернуть сессии из flood/ → sessions/", flood_label)
         console.print(t)
         console.print()
         console.print("  [bold cyan]1–7.[/]  Изменить параметр")
-        console.print("  [bold cyan]8.[/]    Восстановить мёртвые сессии")
-        console.print("  [bold cyan]9.[/]    Вернуть сессии из флудвейта")
+        console.print("  [bold cyan]8.[/]    Управление ботами {bot}")
+        console.print("  [bold cyan]9.[/]    Восстановить мёртвые сессии")
+        console.print("  [bold cyan]10.[/]   Вернуть сессии из флудвейта")
         console.print("  [bold cyan]0.[/]    Назад")
         console.print()
 
-        choice = Prompt.ask("  Выберите", choices=["0","1","2","3","4","5","6","7","8","9"])
+        choice = Prompt.ask("  Выберите", choices=["0","1","2","3","4","5","6","7","8","9","10"])
 
         if choice == "0":
             break
@@ -544,10 +549,14 @@ def settings_menu() -> None:
                 console.print("  Режим: [dim]взаимные контакты + хотя бы 1 сообщение[/]")
 
         elif choice == "8":
-            _restore_dead_sessions()
+            bots_menu()
             continue
 
         elif choice == "9":
+            _restore_dead_sessions()
+            continue
+
+        elif choice == "10":
             from sender import FLOOD_DIR as _FD
             _restore_sessions_from(_FD, "sessions/flood/")
             continue
@@ -557,6 +566,104 @@ def settings_menu() -> None:
 
         save_settings(settings)
         console.print("  [green]Сохранено.[/]")
+
+
+# ─── Bots ─────────────────────────────────────────────────────────────────────
+
+def bots_menu() -> None:
+    from bots import load_bots, save_bots
+
+    while True:
+        console.clear()
+        console.print(_header())
+
+        bots = load_bots()
+
+        t = Table(
+            box=box.SIMPLE,
+            title=f"Боты {{bot}}  ([cyan]{len(bots)}[/])",
+            border_style="cyan",
+        )
+        t.add_column("#", style="dim", justify="right")
+        t.add_column("Username")
+
+        shown = bots[:40]
+        for i, b in enumerate(shown, 1):
+            t.add_row(str(i), b)
+        if len(bots) > 40:
+            t.add_row("…", f"и ещё {len(bots) - 40}")
+
+        console.print(t)
+        console.print()
+        console.print(
+            "  [dim]Используйте [bold]{bot}[/bold] в тексте — при отправке подставится случайный бот.[/]\n"
+        )
+        console.print("  [bold cyan]1.[/]  Добавить бот(ы)  [dim](один или несколько через пробел/запятую)[/]")
+        console.print("  [bold cyan]2.[/]  Импортировать из файла  [dim](bots.txt, один per line)[/]")
+        console.print("  [bold cyan]3.[/]  Удалить по номеру")
+        console.print("  [bold cyan]4.[/]  Очистить весь список")
+        console.print("  [bold cyan]0.[/]  Назад")
+        console.print()
+
+        choice = Prompt.ask("  Выберите", choices=["0", "1", "2", "3", "4"])
+
+        if choice == "0":
+            break
+
+        elif choice == "1":
+            raw = Prompt.ask("  Юзернеймы ботов").strip()
+            # Split by comma or whitespace
+            import re as _re
+            names = [n.strip().lstrip("@") for n in _re.split(r"[,\s]+", raw) if n.strip()]
+            added = 0
+            existing = {b.lstrip("@") for b in bots}
+            for name in names:
+                if name and name not in existing:
+                    bots.append("@" + name)
+                    existing.add(name)
+                    added += 1
+            save_bots(bots)
+            console.print(f"  [green]Добавлено: {added}[/]  (пропущено дублей: {len(names) - added})")
+            Prompt.ask("  Enter")
+
+        elif choice == "2":
+            from bots import BOTS_FILE as _BF
+            if not _BF.exists():
+                console.print("  [yellow]Файл bots.txt не найден в корне проекта.[/]")
+                Prompt.ask("  Enter")
+                continue
+            existing = {b.lstrip("@") for b in bots}
+            added = 0
+            for line in _BF.read_text(encoding="utf-8").splitlines():
+                name = line.strip().lstrip("@")
+                if name and name not in existing:
+                    bots.append("@" + name)
+                    existing.add(name)
+                    added += 1
+            save_bots(bots)
+            console.print(f"  [green]Импортировано: {added}[/]")
+            Prompt.ask("  Enter")
+
+        elif choice == "3":
+            if not bots:
+                console.print("  [yellow]Список пуст.[/]")
+                Prompt.ask("  Enter")
+                continue
+            idx = IntPrompt.ask(f"  Номер (1–{len(bots)})")
+            if 1 <= idx <= len(bots):
+                removed = bots.pop(idx - 1)
+                save_bots(bots)
+                console.print(f"  [green]Удалён: {removed}[/]")
+            else:
+                console.print("  [red]Неверный номер.[/]")
+            Prompt.ask("  Enter")
+
+        elif choice == "4":
+            if bots and Confirm.ask("  Очистить весь список ботов?"):
+                save_bots([])
+                bots = []
+                console.print("  [green]Список очищен.[/]")
+            Prompt.ask("  Enter")
 
 
 # ─── Proxy ───────────────────────────────────────────────────────────────────
